@@ -1,61 +1,84 @@
 - name: Add database to database server
   hosts: localhost
+
+  vars_prompt:
+    - name: list_of_databases
+      prompt: list_of_databases?
+      private: false
+    - name: login_host_prompt
+      prompt: login_host?
+      private: false
+    - name: login_user_prompt
+      prompt: login_user?
+      private: false
+    - name: login_password_prompt
+      prompt: login_password?
+    - name: edit_user_password
+      prompt: edit_user_password?
+
   vars:
-    main_db: <>
     postgres_auth: &postgres_auth
-      login_host: <>
-      login_user: <>
-      login_password: <>
+      login_host: "{{ login_host_prompt }}"
+      login_user: "{{ login_user_prompt }}"
+      login_password: "{{ login_password_prompt }}"
+
   tasks:
+    - set_fact:
+        database_list: "{{ list_of_databases.split(',') }}"
+
     - name: Ping PostgreSQL
       community.postgresql.postgresql_ping:
         <<: *postgres_auth
-        db: "{{ main_db }}"
+        db: "postgres"
       register: result
 
     - name: Create edit user
       community.postgresql.postgresql_user:
         <<: *postgres_auth
-        db: "{{ main_db }}"
-        name: "edit_user"
-        password: "{{ lookup('ansible.builtin.password', 'edit_user_password chars=ascii_letters') }}"
+        db: "postgres"
+        name:  "edit_user"
+        password: "{{ edit_user_password }}"
         comment: This user can edit but not change the schema
 
     - name: Grant usage on schema
       community.postgresql.postgresql_privs:
         <<: *postgres_auth
-        db: "{{ main_db }}"
+        db: "{{ item }}"
         privs: USAGE
         objs: public
         type: schema
         roles: "edit_user"
+      loop: "{{ database_list }}"
 
     - name: Revoke create on schema
       community.postgresql.postgresql_privs:
         <<: *postgres_auth
-        db: "{{ main_db }}"
+        db: "{{ item }}"
         privs: CREATE
         objs: public
         type: schema
         state: absent
         roles: "public"
+      loop: "{{ database_list }}"
 
     - name: Grant editing privs on existing tables
       community.postgresql.postgresql_privs:
         <<: *postgres_auth
-        db: "{{ main_db }}"
+        db: "{{ item }}"
         objs: ALL_IN_SCHEMA
         privs: SELECT,INSERT,UPDATE,DELETE
         type: table
         role: "edit_user"
         schema: public
+      loop: "{{ database_list }}"
 
     - name: Alter default privs to allow edit on db
       community.postgresql.postgresql_privs:
         <<: *postgres_auth
-        db: "{{ main_db }}"
+        db: "{{ item }}"
         objs: TABLES
         privs: SELECT,INSERT,UPDATE,DELETE
         type: default_privs
         role: "edit_user"
         schema: public
+      loop: "{{ database_list }}"
